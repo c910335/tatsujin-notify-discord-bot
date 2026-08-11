@@ -15,13 +15,19 @@ import utils
 class ThreadsMonitor(commands.Cog):
     """Cog managing background polling loops and admin error reporting."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(
+        self,
+        bot: commands.Bot,
+        data_store: data.DataStore | None = None,
+    ) -> None:
         """Initializes the monitor cog and starts the polling task.
 
         Args:
             bot: The commands.Bot instance.
+            data_store: Optional custom DataStore instance.
         """
         self.bot = bot
+        self.db = data_store or data.get_data_store()
         self.monitor_loop.start()
 
     async def cog_unload(self) -> None:
@@ -32,7 +38,7 @@ class ThreadsMonitor(commands.Cog):
     async def monitor_loop(self) -> None:
         """Background monitoring task to poll public Profiles for updates."""
         print("Heartbeat check started.")
-        usernames = data.db.get_all_sub_usernames()
+        usernames = self.db.get_all_sub_usernames()
 
         for username in usernames:
             try:
@@ -69,17 +75,17 @@ class ThreadsMonitor(commands.Cog):
             return
 
         display_name = posts[0].get("display_name") or username
-        data.db.update_display_name(username, display_name)
+        self.db.update_display_name(username, display_name)
 
         post_ids = [p["id"] for p in posts]
 
         # Newly tracked user: initialize seen cache without notifying
-        if username not in data.db.seen_posts:
+        if username not in self.db.seen_posts:
             print(
                 f"Initializing seen posts cache for @{username} "
                 f"({display_name}) with {len(post_ids)} existing posts."
             )
-            data.db.init_user_seen_posts(username, post_ids)
+            self.db.init_user_seen_posts(username, post_ids)
             await asyncio.sleep(config.CHECK_DELAY_SECONDS)
             return
 
@@ -87,12 +93,12 @@ class ThreadsMonitor(commands.Cog):
         new_posts = [
             p
             for p in reversed(posts)
-            if not data.db.is_post_seen(username, p["id"])
+            if not self.db.is_post_seen(username, p["id"])
         ]
 
         for post in new_posts:
             await self._send_alerts(username, post, display_name)
-            data.db.mark_post_seen(username, post["id"])
+            self.db.mark_post_seen(username, post["id"])
 
         await asyncio.sleep(config.CHECK_DELAY_SECONDS)
 
@@ -107,7 +113,7 @@ class ThreadsMonitor(commands.Cog):
             display_name: The display name of the poster.
         """
         print(f"New post from {display_name} (@{username}): {post['url']}")
-        for sub in data.db.get_subscriptions_for_user(username):
+        for sub in self.db.get_subscriptions_for_user(username):
             channel = self.bot.get_channel(sub["channel_id"])
             if not channel:
                 try:

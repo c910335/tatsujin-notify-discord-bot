@@ -32,7 +32,7 @@ class ThreadsMonitorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         # Initialize clean data store
-        self.db = data.db
+        self.db = data.get_data_store()
         self.db.subscriptions = []
         self.db.seen_posts = {}
         self.db.display_names = {}

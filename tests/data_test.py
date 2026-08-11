@@ -174,6 +174,11 @@ class DataStoreTest(unittest.TestCase):
         usernames = self.store.get_all_sub_usernames()
         self.assertEqual(usernames, {"usera", "userb"})
 
+    def test_get_data_store(self) -> None:
+        """Verifies get_data_store returns the DataStore singleton instance."""
+        ds = data.get_data_store()
+        self.assertIsInstance(ds, data.DataStore)
+
 
 if __name__ == "__main__":
     unittest.main()

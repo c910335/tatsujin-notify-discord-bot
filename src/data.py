@@ -352,4 +352,13 @@ class DataStore:
         return self.display_names.get(username.strip().lower(), username)
 
 
-db = DataStore()
+_db = DataStore()
+
+
+def get_data_store() -> DataStore:
+    """Returns the global DataStore singleton instance.
+
+    Returns:
+        The thread-safe DataStore singleton instance.
+    """
+    return _db

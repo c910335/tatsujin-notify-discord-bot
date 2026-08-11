@@ -319,7 +319,9 @@ class ScraperTest(unittest.IsolatedAsyncioTestCase):
             mock_page.close.assert_called_once()
 
     async def test_scrape_user_posts_handles_selector_timeout(self) -> None:
-        """Verifies scrape_user_posts handles selector timeout."""
+        """Verifies scrape_user_posts handles selector timeout and scroll
+        retry.
+        """
         mock_browser = mock.AsyncMock()
         mock_context = mock.MagicMock()
         mock_page = mock.MagicMock()
@@ -329,6 +331,7 @@ class ScraperTest(unittest.IsolatedAsyncioTestCase):
         mock_context.__aexit__ = mock.AsyncMock()
 
         mock_page.goto = mock.AsyncMock()
+        mock_page.evaluate = mock.AsyncMock()
         mock_page.keyboard = mock.MagicMock()
         mock_page.keyboard.press = mock.AsyncMock()
         mock_page.wait_for_selector = mock.AsyncMock(
@@ -344,11 +347,43 @@ class ScraperTest(unittest.IsolatedAsyncioTestCase):
             posts = await scraper.scrape_user_posts(mock_browser, "tester")
             self.assertEqual(posts, [])
             mock_browser.new_context.assert_called_once()
-            mock_page.wait_for_selector.assert_called_once()
+            self.assertEqual(mock_page.wait_for_selector.call_count, 2)
             self.assertEqual(
                 mock_page.wait_for_timeout.call_args_list,
-                [mock.call(1000), mock.call(500)],
+                [mock.call(1000), mock.call(500), mock.call(1500)],
             )
+            mock_page.close.assert_called_once()
+
+    async def test_scrape_user_posts_handles_navigation_error(self) -> None:
+        """Verifies scrape_user_posts handles navigation error gracefully."""
+        mock_browser = mock.AsyncMock()
+        mock_context = mock.MagicMock()
+        mock_page = mock.MagicMock()
+        mock_browser.new_context.return_value = mock_context
+        mock_context.new_page = mock.AsyncMock(return_value=mock_page)
+        mock_context.__aenter__ = mock.AsyncMock(return_value=mock_context)
+        mock_context.__aexit__ = mock.AsyncMock()
+
+        mock_page.goto = mock.AsyncMock(
+            side_effect=async_api.Error("ERR_NAME_NOT_RESOLVED")
+        )
+        mock_page.evaluate = mock.AsyncMock(
+            side_effect=async_api.Error("No frame")
+        )
+        mock_page.keyboard = mock.MagicMock()
+        mock_page.keyboard.press = mock.AsyncMock(
+            side_effect=async_api.Error("No frame")
+        )
+        mock_page.wait_for_selector = mock.AsyncMock(
+            side_effect=async_api.Error("No frame")
+        )
+        mock_page.wait_for_timeout = mock.AsyncMock()
+        mock_page.content = mock.AsyncMock(return_value="")
+        mock_page.close = mock.AsyncMock()
+
+        with mock.patch("scraper.extract_posts_from_html", return_value=[]):
+            posts = await scraper.scrape_user_posts(mock_browser, "tester")
+            self.assertEqual(posts, [])
             mock_page.close.assert_called_once()
 
     async def test_scrape_post_by_id_success(self) -> None:
@@ -363,6 +398,7 @@ class ScraperTest(unittest.IsolatedAsyncioTestCase):
         mock_context.new_page = mock.AsyncMock(return_value=mock_page)
 
         mock_page.goto = mock.AsyncMock()
+        mock_page.evaluate = mock.AsyncMock()
         mock_page.wait_for_selector = mock.AsyncMock()
         mock_page.keyboard = mock.MagicMock()
         mock_page.keyboard.press = mock.AsyncMock()
@@ -394,6 +430,7 @@ class ScraperTest(unittest.IsolatedAsyncioTestCase):
         mock_context.new_page = mock.AsyncMock(return_value=mock_page)
 
         mock_page.goto = mock.AsyncMock()
+        mock_page.evaluate = mock.AsyncMock()
         mock_page.wait_for_selector = mock.AsyncMock()
         mock_page.keyboard = mock.MagicMock()
         mock_page.keyboard.press = mock.AsyncMock()

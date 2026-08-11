@@ -22,11 +22,11 @@ HEARTBEAT_DELAY_SECONDS = int(os.getenv("TNDB_HEARTBEAT_DELAY_SECONDS", "300"))
 CHECK_DELAY_SECONDS = int(os.getenv("TNDB_CHECK_DELAY_SECONDS", "5"))
 
 # Predefined message templates offered as autocomplete choices for /subscribe
-NOTIFICATION_MESSAGE_TEMPLATES = [
+NOTIFICATION_MESSAGE_TEMPLATES = (
     "{mention} {name} 發布了新貼文： {url}",
     "**{name}** 發文囉！{quoted_text}",
     "**{name}** 發文囉！\n{preview_text}",
     "{mention} **{name}**:\n{text}",
     "{mention} **{name}**:{quoted_preview_text}",
     "{text}",
-]
+)

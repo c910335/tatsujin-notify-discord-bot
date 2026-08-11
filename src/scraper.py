@@ -200,18 +200,80 @@ def extract_posts_from_html(html_content: str) -> list[data.PostDict]:
     return sorted_posts
 
 
+async def _safe_run(coro: Any) -> Any:
+    """Executes an awaitable, suppressing and logging Playwright API errors.
+
+    Args:
+        coro: The awaitable coroutine to execute.
+
+    Returns:
+        The result of the coroutine execution, or None if an Error occurs.
+    """
+    try:
+        return await coro
+    except async_api.Error as e:
+        print(f"[Scraper Notice] Playwright operation warning: {e}")
+        return None
+
+
+async def _wait_for_posts(page: async_api.Page) -> None:
+    """Waits for post elements, triggering lazy-loading scroll if needed.
+
+    Args:
+        page: The Playwright page instance.
+    """
+    has_posts = await _safe_run(
+        page.wait_for_selector('a[href*="/post/"]', timeout=5000)
+    )
+    if not has_posts:
+        await _safe_run(page.evaluate("window.scrollBy(0, 500)"))
+        has_posts = await _safe_run(
+            page.wait_for_selector('a[href*="/post/"]', timeout=3000)
+        )
+        if not has_posts:
+            await _safe_run(page.wait_for_timeout(1000))
+
+
+async def _dismiss_login_modal(page: async_api.Page) -> None:
+    """Dismisses the Threads login overlay modal if present.
+
+    Args:
+        page: The Playwright page instance.
+    """
+    await _safe_run(page.keyboard.press("Escape"))
+    await _safe_run(page.wait_for_timeout(500))
+
+
+async def _extract_posts_with_retry(
+    page: async_api.Page,
+) -> list[data.PostDict]:
+    """Extracts posts from page HTML, performing a scroll retry if empty.
+
+    Args:
+        page: The Playwright page instance.
+
+    Returns:
+        A list of extracted post dictionaries.
+    """
+    content = await _safe_run(page.content()) or ""
+    posts = extract_posts_from_html(content)
+
+    if not posts:
+        await _safe_run(page.evaluate("window.scrollBy(0, 500)"))
+        await _safe_run(page.wait_for_timeout(1500))
+        content = await _safe_run(page.content()) or ""
+        posts = extract_posts_from_html(content)
+
+    return posts or []
+
+
 async def _scrape_page_and_extract_posts(
     browser_inst: browser.Browser, url: str
 ) -> list[data.PostDict]:
-    """Loads a Threads page with Playwright and extracts posts.
-
-    Navigates to the given URL, waits for post elements to
-    appear, dismisses the login modal, and parses all posts
-    from the page HTML.
+    """Borrows a BrowserContext, navigates to URL, and extracts posts.
 
     Args:
-        browser_inst: The shared Browser instance to borrow
-            contexts from.
+        browser_inst: The shared Browser instance to borrow contexts from.
         url: The full Threads URL to navigate to.
 
     Returns:
@@ -220,20 +282,15 @@ async def _scrape_page_and_extract_posts(
     async with await browser_inst.new_context() as context:
         page = await context.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            nav_res = await _safe_run(
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            )
+            if nav_res is None:
+                return []
 
-            # Intelligent Page Waiting: Wait for post elements or profile link.
-            try:
-                await page.wait_for_selector('a[href*="/post/"]', timeout=3000)
-            except async_api.Error:
-                await page.wait_for_timeout(1000)
-
-            # Dismiss login modal by pressing Escape
-            await page.keyboard.press("Escape")
-            await page.wait_for_timeout(500)
-
-            content = await page.content()
-            return extract_posts_from_html(content)
+            await _wait_for_posts(page)
+            await _dismiss_login_modal(page)
+            return await _extract_posts_with_retry(page)
 
         finally:
             await page.close()
