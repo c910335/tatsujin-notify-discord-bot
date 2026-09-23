@@ -1,7 +1,9 @@
 """Unit tests for the DataStore thread-safe JSON persistence storage layer."""
 
 # pylint: disable=protected-access,duplicate-code,consider-using-with
+# pylint: disable=too-many-public-methods
 
+import json
 import os
 import tempfile
 import unittest
@@ -108,8 +110,28 @@ class DataStoreTest(unittest.TestCase):
         removed = self.store.remove_subscription("c910335", 111)
         self.assertTrue(removed)
         self.assertEqual(len(self.store.list_subscriptions(111)), 0)
-        self.assertNotIn("c910335", self.store.seen_posts)
+        self.assertNotIn("threads:c910335", self.store.seen_posts)
         self.assertEqual(self.store.get_display_name("c910335"), "c910335")
+
+    def test_remove_subscription_cleans_all_platforms(self) -> None:
+        """Verifies removal cleans up caches across platforms when
+        platform=None.
+        """
+        self.store.add_subscription(
+            "c910335", 111, 222, "msg", "", False, platform="threads"
+        )
+        self.store.add_subscription(
+            "c910335", 111, 222, "msg", "", False, platform="instagram"
+        )
+        self.store.seen_posts["threads:c910335"] = ["p1"]
+        self.store.seen_posts["instagram:c910335"] = ["p2"]
+        self.store.display_names["threads:c910335"] = "達人1"
+        self.store.display_names["instagram:c910335"] = "達人2"
+        self.store.remove_subscription("c910335", 111)
+        self.assertNotIn("threads:c910335", self.store.seen_posts)
+        self.assertNotIn("instagram:c910335", self.store.seen_posts)
+        self.assertNotIn("threads:c910335", self.store.display_names)
+        self.assertNotIn("instagram:c910335", self.store.display_names)
 
     def test_remove_subscription_fail_if_not_present(self) -> None:
         """Verifies removing subscription fails if it does not exist."""
@@ -178,6 +200,163 @@ class DataStoreTest(unittest.TestCase):
         """Verifies get_data_store returns the DataStore singleton instance."""
         ds = data.get_data_store()
         self.assertIsInstance(ds, data.DataStore)
+
+    def test_instagram_subscription_lifecycle(self) -> None:
+        """Verifies full subscription and cache lifecycle for Instagram."""
+        self.store.add_subscription(
+            username="nasa",
+            channel_id=111,
+            server_id=222,
+            message="NASA IG: {url}",
+            mention="",
+            overwrite=False,
+            include_media=True,
+            platform="instagram",
+        )
+        subs = self.store.list_subscriptions(111)
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0]["platform"], "instagram")
+        self.assertEqual(subs[0]["username"], "nasa")
+
+        # Check unique targets
+        targets = self.store.get_unique_targets()
+        self.assertIn(("instagram", "nasa"), targets)
+
+        # Check seen posts and display names isolation
+        self.assertFalse(
+            self.store.has_seen_posts_entry("nasa", platform="instagram")
+        )
+        self.store.init_user_seen_posts(
+            "nasa", ["ig_post_1"], platform="instagram"
+        )
+        self.assertTrue(
+            self.store.has_seen_posts_entry("nasa", platform="instagram")
+        )
+        self.assertTrue(
+            self.store.is_post_seen("nasa", "ig_post_1", platform="instagram")
+        )
+        self.assertFalse(
+            self.store.is_post_seen("nasa", "ig_post_2", platform="instagram")
+        )
+        self.store.mark_post_seen("nasa", "ig_post_2", platform="instagram")
+        self.assertTrue(
+            self.store.is_post_seen("nasa", "ig_post_2", platform="instagram")
+        )
+
+        self.store.update_display_name(
+            "nasa", "NASA Official", platform="instagram"
+        )
+        self.assertEqual(
+            self.store.get_display_name("nasa", platform="instagram"),
+            "NASA Official",
+        )
+        # Threads display name should still default to username
+        self.assertEqual(
+            self.store.get_display_name("nasa", platform="threads"),
+            "nasa",
+        )
+
+        # Removal cleans up caches
+        removed = self.store.remove_subscription(
+            "nasa", 111, platform="instagram"
+        )
+        self.assertTrue(removed)
+        self.assertNotIn("instagram:nasa", self.store.seen_posts)
+        self.assertNotIn("instagram:nasa", self.store.display_names)
+
+    def test_cache_key_resolution(self) -> None:
+        """Verifies _get_cache_key formats correctly across platforms."""
+        self.assertEqual(
+            self.store._get_cache_key("c910335", "threads"),
+            "threads:c910335",
+        )
+        self.assertEqual(
+            self.store._get_cache_key("c910335", "instagram"),
+            "instagram:c910335",
+        )
+
+    def test_remove_subscription_with_platform_filter(self) -> None:
+        """Verifies platform filtering when removing subscriptions."""
+        self.store.add_subscription(
+            "multiuser", 111, 222, "msg", "", False, platform="threads"
+        )
+        self.store.add_subscription(
+            "multiuser", 111, 222, "msg", "", False, platform="instagram"
+        )
+        self.assertEqual(len(self.store.list_subscriptions(111)), 2)
+
+        # Remove only Instagram
+        self.assertTrue(
+            self.store.remove_subscription(
+                "multiuser", 111, platform="instagram"
+            )
+        )
+        remaining = self.store.list_subscriptions(111)
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["platform"], "threads")
+
+    def test_load_legacy_data_backfills_platform(self) -> None:
+        """Verifies load() backfills platform: threads for legacy data."""
+        legacy_data = [
+            {
+                "username": "legacy_user",
+                "channel_id": 111,
+                "server_id": 222,
+                "message": "legacy msg",
+                "mention": "",
+                "include_media": False,
+            }
+        ]
+        with open(self.store.DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(legacy_data, f)
+
+        self.store.load()
+        subs = self.store.list_subscriptions(111)
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0]["platform"], data.Platform.THREADS.value)
+
+    def test_safe_write_cleans_up_temp_on_serialization_failure(self) -> None:
+        """Verifies _safe_write removes temp files on serialization failure."""
+        target_file = os.path.join(self.test_dir, "fail.json")
+        initial_files = set(os.listdir(self.test_dir))
+
+        with self.assertRaises(TypeError):
+            self.store._safe_write(target_file, object())
+
+        current_files = set(os.listdir(self.test_dir))
+        self.assertEqual(initial_files, current_files)
+
+    def test_add_subscription_normalizes_platform(self) -> None:
+        """Verifies add_subscription normalizes platform casing and enum."""
+        self.assertTrue(
+            self.store.add_subscription(
+                "nasa",
+                111,
+                222,
+                "msg",
+                "",
+                False,
+                platform="Instagram",
+            )
+        )
+        sub = self.store.list_subscriptions(111)[0]
+        self.assertEqual(sub["platform"], "instagram")
+
+        # Overwrite with Platform enum
+        self.assertTrue(
+            self.store.add_subscription(
+                "nasa",
+                111,
+                222,
+                "updated msg",
+                "",
+                True,
+                platform=data.Platform.INSTAGRAM,
+            )
+        )
+        updated = self.store.list_subscriptions(111)[0]
+        self.assertEqual(updated["platform"], "instagram")
+        self.assertEqual(updated["message"], "updated msg")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Configuration settings for the Threads Notification Discord Bot."""
+"""Configuration settings for Tatsujin's Notify Discord Bot."""
 
 import os
 import sys
@@ -18,8 +18,27 @@ ADMIN_CHANNEL_ID = int(os.getenv("TNDB_ADMIN_CHANNEL_ID", "0"))
 # How often to check for updates (in seconds)
 HEARTBEAT_DELAY_SECONDS = int(os.getenv("TNDB_HEARTBEAT_DELAY_SECONDS", "300"))
 
+# Maximum random jitter to add/subtract from heartbeat interval (in seconds)
+HEARTBEAT_JITTER_SECONDS = float(
+    os.getenv("TNDB_HEARTBEAT_JITTER_SECONDS", "30.0")
+)
+
 # Cooldown sleep between checking individual targets (in seconds)
-CHECK_DELAY_SECONDS = int(os.getenv("TNDB_CHECK_DELAY_SECONDS", "5"))
+CHECK_DELAY_SECONDS = float(os.getenv("TNDB_CHECK_DELAY_SECONDS", "5"))
+
+# Maximum random jitter to add to check delay (in seconds)
+CHECK_JITTER_SECONDS = float(os.getenv("TNDB_CHECK_JITTER_SECONDS", "2.5"))
+
+# Check interval for Instagram profiles (in seconds) to avoid rate limits;
+# also serves as the base cooldown duration for exponential backoff.
+INSTAGRAM_CHECK_INTERVAL_SECONDS = int(
+    os.getenv("TNDB_INSTAGRAM_CHECK_INTERVAL_SECONDS", "1200")
+)
+
+# Maximum cooldown cap for exponential backoff on Instagram rate limits
+INSTAGRAM_MAX_COOLDOWN_SECONDS = int(
+    os.getenv("TNDB_INSTAGRAM_MAX_COOLDOWN_SECONDS", "43200")
+)
 
 # Predefined message templates offered as autocomplete choices for /subscribe
 NOTIFICATION_MESSAGE_TEMPLATES = (

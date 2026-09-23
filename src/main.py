@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Main entry point for the Threads Notification Discord Bot.
+"""Main entry point for Tatsujin's Notify Discord Bot.
 
 This script initializes configuration, reconfigures stdout buffering to
 ensure real-time logs, and runs the Discord bot instance.
@@ -26,8 +26,8 @@ def main() -> None:
         )
         sys.exit(1)
 
-    print("Starting Threads Notification Discord Bot...")
-    bot_instance = bot.ThreadsBot()
+    print("Starting Notification Discord Bot...")
+    bot_instance = bot.NotifyBot()
     bot_instance.run(token)
 
 

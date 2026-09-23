@@ -6,7 +6,7 @@ from discord.ext import commands
 import browser
 
 
-class ThreadsBot(commands.Bot):
+class NotifyBot(commands.Bot):
     """Subclassed commands.Bot to load configuration and cogs."""
 
     def __init__(self) -> None:
@@ -19,7 +19,7 @@ class ThreadsBot(commands.Bot):
         """Loads all extension cogs and syncs slash commands globally."""
         await self.browser.start()
 
-        await self.load_extension("cogs.threads_commands")
+        await self.load_extension("cogs.commands")
         await self.load_extension("cogs.monitor")
         await self.tree.sync()
         print("Slash commands synced globally.")

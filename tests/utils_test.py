@@ -273,6 +273,29 @@ class UtilsTest(unittest.IsolatedAsyncioTestCase):
         gallery_many = view_many.children[1]
         self.assertEqual(len(gallery_many.items), 10)
 
+    def test_format_notification_truncates_over_2000_chars(self) -> None:
+        """Verifies notification payload is capped at 2000 characters."""
+        sub: data.SubscriptionDict = {
+            "username": "testuser",
+            "channel_id": 123,
+            "server_id": 456,
+            "message": "Long caption: {text}",
+            "mention": "",
+        }
+        post: data.PostDict = {
+            "id": "post123",
+            "code": "C123",
+            "username": "testuser",
+            "display_name": "Test User",
+            "text": "A" * 2500,
+            "timestamp": 1600000000,
+            "url": "https://www.threads.com/@testuser/post/C123",
+            "media_urls": [],
+        }
+        result = utils.format_notification(sub, post, "Test User")
+        self.assertEqual(len(result), 2000)
+        self.assertTrue(result.endswith("..."))
+
     async def test_log_interaction_sends_to_admin(self) -> None:
         """Verifies logging command sends notification to admin channel."""
         mock_interaction = mock.MagicMock()
@@ -315,6 +338,146 @@ class UtilsTest(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(config, "ADMIN_CHANNEL_ID", 999):
             # This should not raise an exception
             await utils.log_interaction(mock_interaction, username="targetuser")
+
+    def test_parse_target_input(self) -> None:
+        """Verifies parsing of URLs and identifiers for Threads and
+        Instagram.
+        """
+        # Empty string
+        self.assertEqual(utils.parse_target_input(""), ("threads", ""))
+
+        # Instagram profile URL
+        self.assertEqual(
+            utils.parse_target_input("https://www.instagram.com/nasa/"),
+            ("instagram", "nasa"),
+        )
+        self.assertEqual(
+            utils.parse_target_input("https://instagram.com/pumashen"),
+            ("instagram", "pumashen"),
+        )
+
+        # Instagram post and reel URLs
+        self.assertEqual(
+            utils.parse_target_input(
+                "https://www.instagram.com/p/DdEo7DPG8x2/"
+            ),
+            ("instagram", "DdEo7DPG8x2"),
+        )
+        self.assertEqual(
+            utils.parse_target_input(
+                "https://www.instagram.com/reel/DcMXl1IPNtB/"
+            ),
+            ("instagram", "DcMXl1IPNtB"),
+        )
+
+        # Threads profile URLs
+        self.assertEqual(
+            utils.parse_target_input("https://www.threads.net/@c910335"),
+            ("threads", "c910335"),
+        )
+        self.assertEqual(
+            utils.parse_target_input("https://www.threads.com/@c910335/"),
+            ("threads", "c910335"),
+        )
+
+        # Threads post URLs
+        self.assertEqual(
+            utils.parse_target_input(
+                "https://www.threads.com/@c910335/post/DH_eOgcSUww"
+            ),
+            ("threads", "DH_eOgcSUww"),
+        )
+        self.assertEqual(
+            utils.parse_target_input(
+                "https://www.threads.com/post/DH_eOgcSUww"
+            ),
+            ("threads", "DH_eOgcSUww"),
+        )
+
+        # Scheme-less URLs
+        self.assertEqual(
+            utils.parse_target_input("instagram.com/nasa"),
+            ("instagram", "nasa"),
+        )
+        self.assertEqual(
+            utils.parse_target_input("threads.net/@c910335"),
+            ("threads", "c910335"),
+        )
+
+        # Bare usernames and handles
+        self.assertEqual(
+            utils.parse_target_input("@nasa", default_platform="instagram"),
+            ("instagram", "nasa"),
+        )
+        self.assertEqual(
+            utils.parse_target_input("c910335"),
+            ("threads", "c910335"),
+        )
+
+    def test_format_notification_instagram_fallback_url(self) -> None:
+        """Verifies Instagram URL fallback when {url} is omitted."""
+        sub: data.SubscriptionDict = {
+            "username": "nasa",
+            "channel_id": 123,
+            "server_id": 456,
+            "message": "{name} 有新動態！",
+            "mention": "",
+            "include_media": False,
+            "platform": "instagram",
+        }
+        post: data.PostDict = {
+            "id": "post123",
+            "code": "DdEo7DPG8x2",
+            "username": "nasa",
+            "display_name": "NASA",
+            "text": "Space news!",
+            "timestamp": 1600000000,
+            "url": None,
+            "media_urls": [],
+        }
+
+        result = utils.format_notification(sub, post, "NASA")
+        expected = "https://www.instagram.com/p/DdEo7DPG8x2/\nNASA 有新動態！"
+        self.assertEqual(result, expected)
+
+    def test_format_notification_threads_fallback_url(self) -> None:
+        """Verifies Threads URL fallback when post url is missing."""
+        sub: data.SubscriptionDict = {
+            "username": "c910335",
+            "channel_id": 123,
+            "server_id": 456,
+            "message": "{name}: {url}",
+            "mention": "",
+            "include_media": False,
+            "platform": "threads",
+        }
+        post: data.PostDict = {
+            "id": "post123",
+            "code": "C123",
+            "username": "c910335",
+            "display_name": "達人",
+            "text": "Hello",
+            "timestamp": 1600000000,
+            "url": None,
+            "media_urls": [],
+        }
+
+        result = utils.format_notification(sub, post, "達人")
+        expected = "達人: https://www.threads.com/@c910335/post/C123"
+        self.assertEqual(result, expected)
+
+    def test_format_duration(self) -> None:
+        """Verifies duration formatting for various seconds values."""
+        self.assertEqual(utils.format_duration(0), "0s")
+        self.assertEqual(utils.format_duration(45), "45s")
+        self.assertEqual(utils.format_duration(60), "1m")
+        self.assertEqual(utils.format_duration(90), "1m 30s")
+        self.assertEqual(utils.format_duration(1800), "30m")
+        self.assertEqual(utils.format_duration(3600), "1h")
+        self.assertEqual(utils.format_duration(3665), "1h 1m 5s")
+        self.assertEqual(utils.format_duration(7200), "2h")
+        self.assertEqual(utils.format_duration(43200), "12h")
+        self.assertEqual(utils.format_duration(-5), "0s")
 
 
 if __name__ == "__main__":

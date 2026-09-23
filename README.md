@@ -1,8 +1,8 @@
-# Threads Notify Discord Bot
+# Tatsujin's Notify Discord Bot
 
-[![Python Unit Tests and Coverage](https://github.com/c910335/threads-notify-discord-bot/actions/workflows/python-tests.yml/badge.svg)](https://github.com/c910335/threads-notify-discord-bot/actions/workflows/python-tests.yml)
+[![Python Unit Tests and Coverage](https://github.com/c910335/tatsujin-notify-discord-bot/actions/workflows/python-tests.yml/badge.svg)](https://github.com/c910335/tatsujin-notify-discord-bot/actions/workflows/python-tests.yml)
 
-A Discord bot for [Threads](https://www.threads.com) profile post notifications.
+A Discord bot for [Threads](https://www.threads.com) and [Instagram](https://www.instagram.com) profile post notifications.
 
 ## Installation
 
@@ -17,8 +17,8 @@ A Discord bot for [Threads](https://www.threads.com) profile post notifications.
 2. Clone this repository.
 
 ```sh
-git clone https://github.com/c910335/threads-notify-discord-bot.git
-cd threads-notify-discord-bot
+git clone https://github.com/c910335/tatsujin-notify-discord-bot.git
+cd tatsujin-notify-discord-bot
 ```
 
 3. Initialize virtual environment and install dependencies.
@@ -43,7 +43,11 @@ Create a `.env` file in the project root directory and populate your configurati
 TNDB_DISCORD_TOKEN=YOUR_DISCORD_TOKEN_HERE
 TNDB_ADMIN_CHANNEL_ID=0
 TNDB_HEARTBEAT_DELAY_SECONDS=300
+TNDB_HEARTBEAT_JITTER_SECONDS=30.0
 TNDB_CHECK_DELAY_SECONDS=5
+TNDB_CHECK_JITTER_SECONDS=2.5
+TNDB_INSTAGRAM_CHECK_INTERVAL_SECONDS=1200
+TNDB_INSTAGRAM_MAX_COOLDOWN_SECONDS=43200
 ```
 
 ## Usage
@@ -60,27 +64,33 @@ python src/main.py
 
 ## Commands
 
-All commands are restricted to server administrators.
+All commands are restricted to server administrators. Target input accepts usernames (e.g. `c910335`, `snackssion.ig`) or full profile / post URLs (e.g. `https://www.threads.net/@c910335`, `https://www.instagram.com/snackssion.ig/`). When a URL is provided, the platform is automatically detected.
 
-- `/subscribe`: Subscribe to a Threads user profile for the current channel.
-  - `username` (String): The username of the Threads profile (e.g. `c910335`).
+- `/subscribe`: Subscribe to a Threads or Instagram user profile for the current channel.
+  - `username` (String): The username or profile URL (e.g. `https://www.threads.net/@c910335` or `https://www.instagram.com/snackssion.ig/`).
   - `message` (String): The message template to send when the user posts.
     Supports `{name}`, `{text}`, `{preview_text}`, `{quoted_text}`,
     `{quoted_preview_text}`, `{url}`, and `{mention}`. Autocomplete
     templates are available.
   - `mention` (Mentionable, Optional): The user or role to notify.
+    If the template does not explicitly include `{mention}`, it will be
+    prepended automatically.
   - `overwrite` (Boolean, Optional): Whether to overwrite an existing
     subscription (defaults to `False`).
   - `include_media` (Boolean, Optional): Whether to include post images/videos
     in notifications (defaults to `False`).
-- `/unsubscribe`: Unsubscribe from a Threads profile for the current channel.
-  - `username` (String): The Threads username to unsubscribe from.
+  - `platform` (Choice, Optional): `threads` or `instagram` (defaults to
+    `threads`, automatically detected if a URL is provided).
+- `/unsubscribe`: Unsubscribe from a profile for the current channel.
+  - `username` (String): The username or URL to unsubscribe from.
+  - `platform` (Choice, Optional): Optional platform filter (`threads` or `instagram`).
 - `/test`: Trigger a test notification to the current channel.
-  - `username` (String): The Threads username to send a test notification for.
+  - `username` (String): The username or profile URL to send a test notification for.
   - `silent` (Boolean): If true, the test notification will be visible only to
     you (ephemeral).
-- `/post`: Send a one-time test notification for a specific Threads post.
-  - `post_id` (String): The specific Threads post ID/code (e.g. `DH_eOgcSUww`).
+  - `platform` (Choice, Optional): Optional platform filter (`threads` or `instagram`).
+- `/post`: Send a one-time test notification for a specific post.
+  - `post_id` (String): The specific post ID/code or URL (e.g. `DH_eOgcSUww` or `https://www.instagram.com/p/C_ACjgVvIX4/`).
   - `message` (String): The message template to send. Supports `{name}`,
     `{text}`, `{preview_text}`, `{quoted_text}`, `{quoted_preview_text}`,
     `{url}`, and `{mention}`. Autocomplete templates are available.
@@ -89,7 +99,8 @@ All commands are restricted to server administrators.
     in notifications (defaults to `False`).
   - `silent` (Boolean, Optional): If true, the test notification will be
     visible only to you (ephemeral, defaults to `False`).
-- `/list`: List active subscriptions for current channel (ephemeral).
+  - `platform` (Choice, Optional): `threads` or `instagram` (defaults to `threads`, auto-detected if a URL is given).
+- `/list`: List active subscriptions for current channel (ephemeral, tagged with platform badges such as `[Threads]` and `[Instagram]`).
 
 ## Development
 
@@ -131,7 +142,7 @@ coverage report -m
 
 ## Contributing
 
-1. Fork it (<https://github.com/c910335/threads-notify-discord-bot/fork>)
+1. Fork it (<https://github.com/c910335/tatsujin-notify-discord-bot/fork>)
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)

@@ -1,4 +1,4 @@
-"""Unit tests for ThreadsCommands slash commands cog."""
+"""Unit tests for Commands slash commands cog."""
 
 # pylint: disable=protected-access,duplicate-code,consider-using-with
 # pylint: disable=too-many-public-methods
@@ -13,11 +13,12 @@ from discord.ext import commands
 
 import config
 import data
-from cogs import threads_commands
+import scraper
+from cogs import commands as cog_commands
 
 
-class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
-    """Test cases for ThreadsCommands cog."""
+class CommandsTest(unittest.IsolatedAsyncioTestCase):
+    """Test cases for Commands cog."""
 
     def setUp(self) -> None:
         """Sets up custom testing file paths and mock bot context."""
@@ -41,7 +42,7 @@ class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
         # Mock Bot
         self.mock_bot = mock.MagicMock(spec=commands.Bot)
         self.mock_bot.browser = mock.MagicMock()
-        self.commands_cog = threads_commands.ThreadsCommands(self.mock_bot)
+        self.commands_cog = cog_commands.Commands(self.mock_bot)
 
     async def test_subscribe_command_success(self) -> None:
         """Verifies /subscribe command registers a subscription."""
@@ -246,6 +247,41 @@ class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
             "(no media)",
             mock_interaction.response.send_message.call_args[0][0],
         )
+        self.assertIn(
+            "[Threads]",
+            mock_interaction.response.send_message.call_args[0][0],
+        )
+
+    async def test_list_subs_command_chunks_overflow(self) -> None:
+        """Verifies /list command chunks messages when exceeding limit."""
+        for i in range(15):
+            self.db.add_subscription(
+                f"user_{i}",
+                111,
+                222,
+                "A" * 150,
+                "",
+                False,
+            )
+
+        mock_interaction = mock.MagicMock(spec=discord.Interaction)
+        mock_interaction.channel_id = 111
+        mock_interaction.guild_id = 222
+        mock_interaction.user.name = "adminuser"
+        mock_interaction.user.mention = "<@admin>"
+        mock_interaction.command.name = "list"
+        mock_interaction.response = mock.MagicMock()
+        mock_interaction.response.send_message = mock.AsyncMock()
+        mock_interaction.followup = mock.MagicMock()
+        mock_interaction.followup.send = mock.AsyncMock()
+
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            await self.commands_cog.list_subs.callback(
+                self.commands_cog, mock_interaction
+            )
+
+        mock_interaction.response.send_message.assert_called_once()
+        mock_interaction.followup.send.assert_called()
 
     async def test_test_notify_command_success(self) -> None:
         """Verifies /test command triggers manual fetch successfully."""
@@ -396,6 +432,21 @@ class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
             "Test Failed", mock_interaction.followup.send.call_args[0][0]
         )
 
+        # 3. Instagram rate limit error
+        mock_interaction.followup.send.reset_mock()
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            with mock.patch(
+                "scraper.scrape_user_posts",
+                side_effect=scraper.InstagramRateLimitError("Rate limited"),
+            ):
+                await self.commands_cog.test_notify.callback(
+                    self.commands_cog, mock_interaction, "c910335", False
+                )
+        self.assertIn(
+            "Instagram is currently rate-limiting access",
+            mock_interaction.followup.send.call_args[0][0],
+        )
+
     async def test_autocomplete_username_with_active_subscription(self) -> None:
         """Verifies autocomplete_username returns matching choices."""
         self.db.add_subscription("c910335", 111, 222, "msg1", "", False)
@@ -408,6 +459,16 @@ class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
             mock_interaction, "c91"
         )
         self.assertEqual(len(choices), 1)
+
+        # Long display name truncation to stay <= 100 chars
+        self.db.add_subscription("longuser", 111, 222, "msg", "", False)
+        self.db.update_display_name("longuser", "X" * 150)
+        choices_long = await self.commands_cog.autocomplete_username(
+            mock_interaction, "long"
+        )
+        self.assertEqual(len(choices_long), 1)
+        self.assertEqual(len(choices_long[0].name), 100)
+        self.assertTrue(choices_long[0].name.endswith("..."))
 
     async def test_test_notify_not_subscribed(self) -> None:
         """Verifies /test command behavior when not subscribed."""
@@ -434,10 +495,10 @@ class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_setup_commands(self) -> None:
-        """Verifies setup registers ThreadsCommands cog."""
+        """Verifies setup registers Commands cog."""
         mock_bot = mock.MagicMock(spec=commands.Bot)
         mock_bot.add_cog = mock.AsyncMock()
-        await threads_commands.setup(mock_bot)
+        await cog_commands.setup(mock_bot)
         mock_bot.add_cog.assert_called_once()
 
     async def test_post_command_success(self) -> None:
@@ -585,6 +646,38 @@ class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
             mock_interaction.followup.send.call_args[0][0],
         )
 
+    async def test_post_command_instagram_rate_limit(self) -> None:
+        """Verifies /post handles InstagramRateLimitError with clean message."""
+        mock_interaction = mock.MagicMock(spec=discord.Interaction)
+        mock_interaction.channel_id = 111
+        mock_interaction.guild_id = 222
+        mock_interaction.user.name = "adminuser"
+        mock_interaction.command.name = "post"
+        mock_interaction.response = mock.MagicMock()
+        mock_interaction.response.defer = mock.AsyncMock()
+        mock_interaction.followup = mock.MagicMock()
+        mock_interaction.followup.send = mock.AsyncMock()
+
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            with mock.patch(
+                "scraper.scrape_post_by_id",
+                side_effect=scraper.InstagramRateLimitError("Rate limited"),
+            ):
+                await self.commands_cog.test_post.callback(
+                    self.commands_cog,
+                    interaction=mock_interaction,
+                    post_id="https://www.instagram.com/p/DdEo7DPG8x2/",
+                    message="hello {name}",
+                    mention=None,
+                    include_media=False,
+                )
+
+        mock_interaction.followup.send.assert_called_once()
+        self.assertIn(
+            "Instagram is currently rate-limiting access",
+            mock_interaction.followup.send.call_args[0][0],
+        )
+
     async def test_post_command_rejects_backticks(self) -> None:
         """Verifies /post command rejects message template with backticks."""
         mock_interaction = mock.MagicMock(spec=discord.Interaction)
@@ -646,6 +739,212 @@ class ThreadsCommandsTest(unittest.IsolatedAsyncioTestCase):
                 mock_interaction, "foo"
             )
             mock_msg.assert_called_once_with(mock_interaction, "foo")
+
+    async def test_subscribe_command_instagram_url_autodetect(self) -> None:
+        """Verifies /subscribe command auto-detects Instagram from URL."""
+        mock_interaction = mock.MagicMock(spec=discord.Interaction)
+        mock_interaction.channel_id = 111
+        mock_interaction.guild_id = 222
+        mock_interaction.user.name = "adminuser"
+        mock_interaction.user.mention = "<@admin>"
+        mock_interaction.command.name = "subscribe"
+        mock_interaction.response = mock.MagicMock()
+        mock_interaction.response.send_message = mock.AsyncMock()
+
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            await self.commands_cog.subscribe.callback(
+                self.commands_cog,
+                interaction=mock_interaction,
+                username="https://www.instagram.com/nasa/",
+                message="NASA IG: {url}",
+                mention=None,
+                overwrite=False,
+                include_media=True,
+                platform="threads",  # Defaults to threads, but URL overrides
+            )
+
+        subs = self.db.list_subscriptions(111)
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0]["username"], "nasa")
+        self.assertEqual(subs[0]["platform"], "instagram")
+        self.assertTrue(subs[0]["include_media"])
+
+    async def test_unsubscribe_command_instagram_url(self) -> None:
+        """Verifies /unsubscribe command accepts Instagram URLs."""
+        self.db.add_subscription(
+            "nasa", 111, 222, "msg", "", False, platform="instagram"
+        )
+        mock_interaction = mock.MagicMock(spec=discord.Interaction)
+        mock_interaction.channel_id = 111
+        mock_interaction.guild_id = 222
+        mock_interaction.user.name = "adminuser"
+        mock_interaction.user.mention = "<@admin>"
+        mock_interaction.command.name = "unsubscribe"
+        mock_interaction.response = mock.MagicMock()
+        mock_interaction.response.send_message = mock.AsyncMock()
+
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            await self.commands_cog.unsubscribe.callback(
+                self.commands_cog,
+                mock_interaction,
+                "https://www.instagram.com/nasa/",
+            )
+
+        subs = self.db.list_subscriptions(111)
+        self.assertEqual(len(subs), 0)
+
+    async def test_test_notify_instagram_with_media_enrichment(self) -> None:
+        """Verifies /test enriches media carousel for Instagram
+        subscriptions.
+        """
+        self.db.add_subscription(
+            "nasa",
+            111,
+            222,
+            "NASA {url}",
+            "",
+            False,
+            include_media=True,
+            platform="instagram",
+        )
+
+        mock_interaction = mock.MagicMock(spec=discord.Interaction)
+        mock_interaction.channel_id = 111
+        mock_interaction.guild_id = 222
+        mock_interaction.user.name = "adminuser"
+        mock_interaction.user.mention = "<@admin>"
+        mock_interaction.command.name = "test"
+        mock_interaction.response = mock.MagicMock()
+        mock_interaction.response.defer = mock.AsyncMock()
+        mock_interaction.followup = mock.MagicMock()
+        mock_interaction.followup.send = mock.AsyncMock()
+
+        mock_posts = [
+            {
+                "id": "ig_123",
+                "code": "DdEo7DPG8x2",
+                "username": "nasa",
+                "display_name": "NASA",
+                "text": "Space news",
+                "timestamp": 1700000000,
+                "url": "https://www.instagram.com/p/DdEo7DPG8x2/",
+                "media_urls": ["https://example.com/thumb.jpg"],
+            }
+        ]
+        detailed_post = {
+            "id": "ig_123",
+            "code": "DdEo7DPG8x2",
+            "username": "nasa",
+            "display_name": "NASA",
+            "text": "Space news",
+            "timestamp": 1700000000,
+            "url": "https://www.instagram.com/p/DdEo7DPG8x2/",
+            "media_urls": [
+                "https://example.com/1.jpg",
+                "https://example.com/2.jpg",
+            ],
+        }
+
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            with mock.patch(
+                "scraper.scrape_user_posts", return_value=mock_posts
+            ) as mock_user_scrape:
+                with mock.patch(
+                    "scraper.scrape_post_by_id", return_value=detailed_post
+                ) as mock_post_scrape:
+                    await self.commands_cog.test_notify.callback(
+                        self.commands_cog,
+                        mock_interaction,
+                        "https://www.instagram.com/nasa/",
+                        False,
+                    )
+
+        mock_user_scrape.assert_called_once_with(
+            self.mock_bot.browser, "nasa", platform="instagram"
+        )
+        mock_post_scrape.assert_called_once_with(
+            self.mock_bot.browser, "DdEo7DPG8x2", platform="instagram"
+        )
+        mock_interaction.followup.send.assert_called_once()
+        kwargs = mock_interaction.followup.send.call_args[1]
+        self.assertIn("view", kwargs)
+
+    async def test_post_command_instagram_url(self) -> None:
+        """Verifies /post command handles Instagram post URLs."""
+        mock_interaction = mock.MagicMock(spec=discord.Interaction)
+        mock_interaction.channel_id = 111
+        mock_interaction.guild_id = 222
+        mock_interaction.user.name = "adminuser"
+        mock_interaction.user.mention = "<@admin>"
+        mock_interaction.command.name = "post"
+        mock_interaction.response = mock.MagicMock()
+        mock_interaction.response.defer = mock.AsyncMock()
+        mock_interaction.followup = mock.MagicMock()
+        mock_interaction.followup.send = mock.AsyncMock()
+
+        mock_post: data.PostDict = {
+            "id": "post_ig_1",
+            "code": "DdEo7DPG8x2",
+            "username": "nasa",
+            "display_name": "NASA",
+            "text": "Hello IG",
+            "timestamp": 1700000000,
+            "url": "https://www.instagram.com/p/DdEo7DPG8x2/",
+            "media_urls": [],
+        }
+
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            with mock.patch(
+                "scraper.scrape_post_by_id", return_value=mock_post
+            ) as mock_scrape:
+                await self.commands_cog.test_post.callback(
+                    self.commands_cog,
+                    interaction=mock_interaction,
+                    post_id="https://www.instagram.com/p/DdEo7DPG8x2/",
+                    message="hello {name} {url}",
+                    mention=None,
+                    include_media=False,
+                    platform="threads",
+                )
+
+        mock_scrape.assert_called_once_with(
+            self.mock_bot.browser, "DdEo7DPG8x2", platform="instagram"
+        )
+        mock_interaction.followup.send.assert_called_once()
+
+    async def test_list_and_autocomplete_instagram(self) -> None:
+        """Verifies /list and autocompleter format Instagram badges."""
+        self.db.add_subscription(
+            "nasa", 111, 222, "msg", "", False, platform="instagram"
+        )
+        self.db.update_display_name(
+            "nasa", "NASA Official", platform="instagram"
+        )
+
+        mock_interaction = mock.MagicMock(spec=discord.Interaction)
+        mock_interaction.channel_id = 111
+        mock_interaction.guild_id = 222
+        mock_interaction.user.name = "adminuser"
+        mock_interaction.command.name = "list"
+        mock_interaction.response = mock.MagicMock()
+        mock_interaction.response.send_message = mock.AsyncMock()
+
+        with mock.patch.object(config, "ADMIN_CHANNEL_ID", 0):
+            await self.commands_cog.list_subs.callback(
+                self.commands_cog, mock_interaction
+            )
+
+        content = mock_interaction.response.send_message.call_args[0][0]
+        self.assertIn("[Instagram]", content)
+        self.assertIn("@nasa", content)
+
+        # Autocomplete
+        choices = await self.commands_cog.autocomplete_username(
+            mock_interaction, "nas"
+        )
+        self.assertEqual(len(choices), 1)
+        self.assertEqual(choices[0].name, "[Instagram] NASA Official (@nasa)")
+        self.assertEqual(choices[0].value, "nasa")
 
 
 if __name__ == "__main__":

@@ -1,11 +1,60 @@
 """Helper utility functions for logging and message formatting."""
 
+import re
 from typing import Any
 
 import discord
 
 import config
 import data
+
+
+def parse_target_input(
+    raw_input: str,
+    default_platform: str | data.Platform = data.Platform.THREADS,
+) -> tuple[str, str]:
+    """Parses a raw input string (username or URL) into (platform, identifier).
+
+    Supports Threads and Instagram profile URLs, post/reel URLs, and handles.
+
+    Args:
+        raw_input: The raw string entered by the user.
+        default_platform: The default platform if none is detected in the input.
+
+    Returns:
+        A tuple of (platform, identifier).
+    """
+    cleaned = raw_input.strip()
+    if not cleaned:
+        return str(default_platform), ""
+
+    # Check for Instagram URLs
+    ig_post_match = re.search(
+        r"instagram\.com/(?:p|reel|reels)/([A-Za-z0-9_-]+)", cleaned
+    )
+    if ig_post_match:
+        return data.Platform.INSTAGRAM.value, ig_post_match.group(1)
+
+    ig_user_match = re.search(r"instagram\.com/([A-Za-z0-9_.]+)", cleaned)
+    if ig_user_match:
+        return data.Platform.INSTAGRAM.value, ig_user_match.group(1)
+
+    # Check for Threads URLs
+    threads_post_match = re.search(
+        r"threads\.(?:com|net)/(?:@[^/]+/)?post/([A-Za-z0-9_-]+)", cleaned
+    )
+    if threads_post_match:
+        return data.Platform.THREADS.value, threads_post_match.group(1)
+
+    threads_user_match = re.search(
+        r"threads\.(?:com|net)/@([A-Za-z0-9_.]+)", cleaned
+    )
+    if threads_user_match:
+        return data.Platform.THREADS.value, threads_user_match.group(1)
+
+    # Bare username or code (strip leading @ if present)
+    bare = cleaned.lstrip("@").rstrip("/")
+    return str(default_platform), bare
 
 
 async def log_interaction(
@@ -40,6 +89,34 @@ async def log_interaction(
             await channel.send(msg)
         except (discord.DiscordException, OSError) as e:
             print(f"Failed to log to admin channel: {e}")
+
+
+def format_duration(seconds: int | float) -> str:
+    """Formats a duration in seconds into a human-readable string.
+
+    Examples:
+        3600 -> "1h"
+        5400 -> "1h 30m"
+        1800 -> "30m"
+        45 -> "45s"
+
+    Args:
+        seconds: Duration in seconds.
+
+    Returns:
+        Human-readable duration string.
+    """
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    parts: list[str] = []
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if secs > 0 or not parts:
+        parts.append(f"{secs}s")
+    return " ".join(parts)
 
 
 def get_preview_text(text: str) -> str:
@@ -105,10 +182,13 @@ def format_notification(
         The formatted notification message payload string.
     """
     mention_str = sub["mention"] if sub.get("mention") else ""
-    url = (
-        post["url"]
-        or f"https://www.threads.com/@{post['username']}/post/{post['code']}"
-    )
+    platform = sub.get("platform", "threads")
+    if post.get("url"):
+        url = post["url"]
+    elif platform == "instagram":
+        url = f"https://www.instagram.com/p/{post['code']}/"
+    else:
+        url = f"https://www.threads.com/@{post['username']}/post/{post['code']}"
 
     message_template = sub["message"]
     if mention_str and "{mention}" not in message_template:
@@ -130,12 +210,15 @@ def format_notification(
         msg = f"{url}\n{msg}"
 
     media_urls = post.get("media_urls") or []
-    if sub.get("include_media", True) and len(media_urls) > 10:
+    if sub.get("include_media", False) and len(media_urls) > 10:
         omitted = len(media_urls) - 10
         msg = (
             f"{msg}\n*(Note: {omitted} additional media items were omitted "
             f"due to Discord limitations)*"
         )
+
+    if len(msg) > 2000:
+        msg = msg[:1997] + "..."
 
     return msg
 

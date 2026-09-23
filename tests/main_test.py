@@ -36,7 +36,7 @@ class MainTest(unittest.TestCase):
         mock_bot_instance.run = mock.MagicMock()
 
         with mock.patch.object(config, "DISCORD_TOKEN", "valid_token"):
-            with mock.patch("bot.ThreadsBot", return_value=mock_bot_instance):
+            with mock.patch("bot.NotifyBot", return_value=mock_bot_instance):
                 with mock.patch("sys.stdout.reconfigure") as mock_reconfig:
                     with mock.patch("builtins.print"):
                         main.main()
