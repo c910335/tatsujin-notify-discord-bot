@@ -393,6 +393,10 @@ class UtilsTest(unittest.IsolatedAsyncioTestCase):
             ),
             ("threads", "DH_eOgcSUww"),
         )
+        self.assertEqual(
+            utils.parse_target_input("https://www.threads.net/t/DH_eOgcSUww"),
+            ("threads", "DH_eOgcSUww"),
+        )
 
         # Scheme-less URLs
         self.assertEqual(

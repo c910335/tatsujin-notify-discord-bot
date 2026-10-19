@@ -228,6 +228,41 @@ class ScraperTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(posts[0]["id"], "post_newer")
         self.assertEqual(posts[1]["id"], "post_older")
 
+    def test_extract_threads_posts_from_media_block(self) -> None:
+        """Verifies extracting post from media block on single post pages."""
+        mock_html = """
+        <html>
+            <body>
+                <script type="application/json">
+                {
+                    "require": [
+                        {
+                            "data": {
+                                "media": {
+                                    "id": "single_media_123",
+                                    "code": "DaYDIr2jxF8",
+                                    "taken_at": 1783178407,
+                                    "user": {
+                                        "username": "yumei_sakura",
+                                        "full_name": "Test User"
+                                    },
+                                    "caption": {"text": "Hello Mango"}
+                                }
+                            }
+                        }
+                    ]
+                }
+                </script>
+            </body>
+        </html>
+        """
+        posts = scraper.extract_threads_posts_from_html(mock_html)
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0]["id"], "single_media_123")
+        self.assertEqual(posts[0]["code"], "DaYDIr2jxF8")
+        self.assertEqual(posts[0]["username"], "yumei_sakura")
+        self.assertEqual(posts[0]["text"], "Hello Mango")
+
     def test_extract_posts_with_identical_timestamps(self) -> None:
         """Verifies sorting by numerical ID when timestamps are identical."""
         mock_html = """

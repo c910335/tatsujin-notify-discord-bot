@@ -41,7 +41,7 @@ def parse_target_input(
 
     # Check for Threads URLs
     threads_post_match = re.search(
-        r"threads\.(?:com|net)/(?:@[^/]+/)?post/([A-Za-z0-9_-]+)", cleaned
+        r"threads\.(?:com|net)/(?:@[^/]+/)?(?:post|t)/([A-Za-z0-9_-]+)", cleaned
     )
     if threads_post_match:
         return data.Platform.THREADS.value, threads_post_match.group(1)

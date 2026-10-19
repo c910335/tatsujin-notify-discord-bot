@@ -23,10 +23,10 @@ def _parse_post(post_data: dict[str, Any]) -> data.PostDict | None:
     if not isinstance(post_data, dict):
         return None
     post_id = post_data.get("id")
-    if not post_id:
+    code = post_data.get("code")
+    if not post_id or not code:
         return None
 
-    code = post_data.get("code")
     user = post_data.get("user") or {}
     username = user.get("username")
     display_name = user.get("full_name") or username
@@ -53,6 +53,37 @@ def _parse_post(post_data: dict[str, Any]) -> data.PostDict | None:
     }
 
 
+def _extract_posts_from_data_dict(
+    data_dict: dict[str, Any],
+    unique_posts: dict[str, data.PostDict],
+) -> None:
+    """Extracts posts from decoded JSON dictionary into unique_posts.
+
+    Args:
+        data_dict: The decoded JSON dictionary.
+        unique_posts: Dictionary of unique posts keyed by post ID.
+    """
+    thread_items_lists = common.find_key_in_dict(data_dict, "thread_items")
+    for items_list in thread_items_lists:
+        if not isinstance(items_list, list):
+            continue
+        for item in items_list:
+            if not isinstance(item, dict) or "post" not in item:
+                continue
+            parsed = _parse_post(item["post"])
+            if parsed:
+                unique_posts[parsed["id"]] = parsed
+
+    media_items = common.find_key_in_dict(data_dict, "media")
+    for media in media_items:
+        if isinstance(media, dict) and media.get("id") and media.get("code"):
+            parsed = _parse_post(media)
+            if parsed:
+                existing = unique_posts.get(parsed["id"])
+                if not existing or (not existing["text"] and parsed["text"]):
+                    unique_posts[parsed["id"]] = parsed
+
+
 def extract_threads_posts_from_html(
     html_content: str,
 ) -> list[data.PostDict]:
@@ -66,8 +97,7 @@ def extract_threads_posts_from_html(
         descending.
     """
     json_scripts = common.extract_json_scripts(html_content)
-
-    unique_posts = {}
+    unique_posts: dict[str, data.PostDict] = {}
 
     for script_content in json_scripts:
         script_content = script_content.strip()
@@ -75,19 +105,7 @@ def extract_threads_posts_from_html(
             continue
         try:
             data_dict = json.loads(script_content)
-            thread_items_lists = common.find_key_in_dict(
-                data_dict, "thread_items"
-            )
-
-            for items_list in thread_items_lists:
-                if not isinstance(items_list, list):
-                    continue
-                for item in items_list:
-                    if not isinstance(item, dict) or "post" not in item:
-                        continue
-                    parsed = _parse_post(item["post"])
-                    if parsed:
-                        unique_posts[parsed["id"]] = parsed
+            _extract_posts_from_data_dict(data_dict, unique_posts)
         except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
             # Ignore parsing errors from unexpected API payload structures.
             pass
